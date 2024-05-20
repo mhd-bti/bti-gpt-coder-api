@@ -6,8 +6,6 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const fs = require('fs');
 const crypto = require('crypto');
-// const { channel } = require('diagnostics_channel');
-// const { log } = require('console');
 
 // dotenvパッケージを読み込み、環境変数を強制的に上書きする
 dotenv.config({ override: true });
@@ -16,43 +14,15 @@ const app = express();
 const port = 5000;
 
 // OpenAI APIの設定
-const openaiModel = process.env.OPENAI_API_MODEL;
+const openaiModel = process.env.OPENAI_API_MODEL_DEFAULT;
 const openaiOrganization = process.env.OPENAI_ORGANIZATION;
+
+const targetProjectDir = process.env.TARGET_PROJECT_DIR;
 
 const openai = new OpenAI(organization = openaiOrganization);
 
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '100mb' }));
 app.use(cors());
-
-// システムプロンプトを生成する
-const generateSystemPrompt = () => {
-  return `
-あなたは、[React]に精通したプロのITエンジニアです。
-以下の入力内容を元に完全なソースコードを生成してください。
-なお、生成するソースコードは、最上位の親コンポーネントであるApp（ファイル名：App.jsx）および、必要な子コンポーネントを全て生成してください。
-
-# 出力フォーマット
-必ず、以下の完全なJSON形式で出力してください。
-結果が0件の場合は、空の配列を出力してください。
-結果が1件以上の場合は、必ず配列で出力してください。
-JSON形式以外では絶対に出力しないでください。
-結果には、filename、code、descriptionを必ず含めてください。
-値がない場合には、空文字""を返してください。
-
-{
-  "result": [
-    {
-      "filename": "ファイル名",
-      "code": "コードの内容",
-      "description": "コードの簡単な説明"
-    }
-  ]
-}
-
-再度の確認ですが、出力はJSON形式でないといけません。
-すなわち、"{"で始まり、"}"で終わる必要があります。
-`;
-};
 
 // ユーザープロンプトを生成する
 const generateUserPrompt = (userInput) => {
@@ -68,29 +38,51 @@ function generateRandomString(length) {
 }
 
 // リクエストをOpenAI APIに送信する関数
-const sendRequestToOpenAI = async (userInput, history, retries = 3, delay = 1000) => {
+const sendRequestToOpenAI = async (userInput, images, history, test = false, gptModel = openaiModel, systemPrompt = "", retries = 3, delay = 1000) => {
   try {
     // GPTに渡すプロンプトを生成
     const messages = history;
 
-    // 履歴がない場合は、システムプロンプトを追加する
-    if (!history.length) {
-      const systemPrompt = generateSystemPrompt();
+    // システムプロンプトを追加する
+    if (systemPrompt) {
+      // const systemPrompt = generateSystemPrompt();
       console.log(`systemPrompt : ${systemPrompt}`);
 
       messages.push({ role: "system", content: systemPrompt });
     }
 
-    // 今回のユーザー入力を追加する
+    // ユーザープロンプトを追加する
     const userPrompt = generateUserPrompt(userInput);
     console.log(`userPrompt : ${userPrompt}`);
-    messages.push({ role: "user", content: userPrompt });
+
+    const content = [
+      {
+        type: "text",
+        text: userPrompt
+      }
+    ];
+    // 画像を追加する
+    images.forEach((image) => {
+      content.push({
+        type: "image_url",
+        image_url: {
+          url: image.file
+        }
+      });
+    });
+
+    messages.push(
+      {
+        role: "user",
+        content: content
+      }
+    );
 
     let completion = {};
-    if (true) {
+    if (!test) {
       const data = {
         messages: messages,
-        model: openaiModel,
+        model: gptModel
       };
 
       console.log("request data : ", data);
@@ -107,7 +99,10 @@ const sendRequestToOpenAI = async (userInput, history, retries = 3, delay = 1000
           index: 0,
           message: {
             role: 'assistant',
-            content: 'json\n\n' +
+            // ************************
+            // content: 'わかりません。'
+            // ************************
+            content: 'ここまで前置き\n\njson\n\n' +
               '{\n' +
               '  "result": [\n' +
               '    {\n' +
@@ -116,13 +111,25 @@ const sendRequestToOpenAI = async (userInput, history, retries = 3, delay = 1000
               '      "description": "Reactコンポーネントとstateを使用して、住所、氏名、年齢のフォームを作成し、確認と送信の2つの画面を表示するアプリケーション"\n' +
               '    },\n' +
               '    {\n' +
-              '      "filename": "App.jsx",\n' +
+              '      "filename": "App2.jsx",\n' +
               `      "code": "import React, { useState } from 'react';\\n\\nconst App = () => {\\n  const [address, setAddress] = useState('');\\n  const [name, setName] = useState('');\\n  const [age, setAge] = useState(0);\\n  const [confirmation, setConfirmation] = useState(false);\\n  const [submitted, setSubmitted] = useState(false);\\n\\n  const handleAddressChange = (e) => {\\n    setAddress(e.target.value);\\n  };\\n\\n  const handleNameChange = (e) => {\\n    setName(e.target.value);\\n  };\\n\\n  const handleAgeChange = (e) => {\\n    setAge(e.target.value);\\n  };\\n\\n  const handleConfirmation = () => {\\n    setConfirmation(true);\\n  };\\n\\n  const handleSubmit = () => {\\n    setSubmitted(true);\\n  };\\n\\n  return (\\n    <div>\\n      {!confirmation && !submitted && (\\n        <div>\\n          <label>Address:</label>\\n          <input type='text' value={address} onChange={handleAddressChange} />\\n          <br />\\n          <label>Name:</label>\\n          <input type='text' value={name} onChange={handleNameChange} />\\n          <br />\\n          <label>Age:</label>\\n          <input type='number' value={age} onChange={handleAgeChange} />\\n          <br />\\n          <button onClick={handleConfirmation}>Confirm</button>\\n        </div>\\n      )}\\n      {confirmation && !submitted && (\\n        <div>\\n          <p>Confirm Address: {address}</p>\\n          <p>Confirm Name: {name}</p>\\n          <p>Confirm Age: {age}</p>\\n          <button onClick={handleSubmit}>Submit</button>\\n        </div>\\n      )}\\n      {submitted && (\\n        <div>\\n          <h2>Thank you for submitting!</h2>\\n          <p>Address: {address}</p>\\n          <p>Name: {name}</p>\\n          <p>Age: {age}</p>\\n        </div>\\n      )}\\n    </div>\\n  );\\n};\\n\\nexport default App;",\n` +
               '      "description": "Reactコンポーネントとstateを使用して、住所、氏名、年齢のフォームを作成し、確認と送信の2つの画面を表示するアプリケーション"\n' +
               '    }\n' +
               '  ]\n' +
               '}\n\n' +
               'このような結果です。'
+            // ************************
+            // content: 'ここまで前置き\n\njson\n\n' +
+            //   '{\n' +
+            //   '  "result": [\n' +
+            //   '    {\n' +
+            //   '      "filename": "App.jsx",\n' +
+            //   `      "code": "import React, { useState } from 'react';\\n\\nconst App = () => {\\n  const [address, setAddress] = useState('');\\n  const [name, setName] = useState('');\\n  const [age, setAge] = useState(0);\\n  const [confirmation, setConfirmation] = useState(false);\\n  const [submitted, setSubmitted] = useState(false);\\n\\n  const handleAddressChange = (e) => {\\n    setAddress(e.target.value);\\n  };\\n\\n  const handleNameChange = (e) => {\\n    setName(e.target.value);\\n  };\\n\\n  const handleAgeChange = (e) => {\\n    setAge(e.target.value);\\n  };\\n\\n  const handleConfirmation = () => {\\n    setConfirmation(true);\\n  };\\n\\n  const handleSubmit = () => {\\n    setSubmitted(true);\\n  };\\n\\n  return (\\n    <div>\\n      {!confirmation && !submitted && (\\n        <div>\\n          <label>Address:</label>\\n          <input type='text' value={address} onChange={handleAddressChange} />\\n          <br />\\n          <label>Name:</label>\\n          <input type='text' value={name} onChange={handleNameChange} />\\n          <br />\\n          <label>Age:</label>\\n          <input type='number' value={age} onChange={handleAgeChange} />\\n          <br />\\n          <button onClick={handleConfirmation}>Confirm</button>\\n        </div>\\n      )}\\n      {confirmation && !submitted && (\\n        <div>\\n          <p>Confirm Address: {address}</p>\\n          <p>Confirm Name: {name}</p>\\n          <p>Confirm Age: {age}</p>\\n          <button onClick={handleSubmit}>Submit</button>\\n        </div>\\n      )}\\n      {submitted && (\\n        <div>\\n          <h2>Thank you for submitting!</h2>\\n          <p>Address: {address}</p>\\n          <p>Name: {name}</p>\\n          <p>Age: {age}</p>\\n        </div>\\n      )}\\n    </div>\\n  );\\n};\\n\\nexport default App;",\n` +
+            //   '      "description": "Reactコンポーネントとstateを使用して、住所、氏名、年齢のフォームを作成し、確認と送信の2つの画面を表示するアプリケーション"\n' +
+            //   '    }\n' +
+            //   '  ]\n' +
+            //   '}\n\n' +
+            //   'このような結果です。'
           },
           logprobs: null,
           finish_reason: 'stop'
@@ -180,7 +187,7 @@ const readHistory = (id) => {
 
 // 会話履歴を保存する
 // [ToDo] 保存失敗した際の処理を追加する
-const storeHistory = (result, history) => {
+const storeHistory = (result) => {
   const newHistory = result.messages;
   newHistory.push(result.choice.message);
 
@@ -204,36 +211,59 @@ const storeHistory = (result, history) => {
 };
 
 const historyFilePath = (id) => {
-  return `history/${id}.json`;
+  return `.history/${id}.json`;
 };
 
 // コードを生成する
 app.post('/api/generate-code', async (req, res) => {
   const userInput = req.body.userInput;
+  const images = req.body.images;
   const prevId = req.body.prevId;
+  const isTest = req.body.isTest;
+  const model = req.body.model;
+  const systemPrompt_ = req.body.systemPrompt;
 
   console.log("prevId : ", prevId);
   console.log("userInput : ", userInput);
+  console.log("images : ", images);
+  console.log("isTest : ", isTest);
+  console.log("model : ", model);
+  console.log("systemPrompt_ : ", systemPrompt_);
 
   // 会話履歴を読み込む
   const history = readHistory(prevId);
 
   try {
     // 会話履歴と併せてOpenAI APIにリクエストを送信する
-    const result = await sendRequestToOpenAI(userInput, history);
+    const result = await sendRequestToOpenAI(userInput, images, history, test = isTest, gptModel = model, systemPrompt = systemPrompt_);
 
     // 会話履歴を保存する（履歴に保存する内容はGPTからの応答そのままのため、JSON形式ではない可能性がある）
     storeHistory(result, history);
 
     // JSON形式に変換（GPTの応答がJSON形式でない場合は、可能な限りJSON形式に変換する）
-    const codesString = result.choice.message.content.replace(/^[^\{]*\{/, '{').replace(/\}[^\}]*$/, '}');
+    const preface = result.choice.message.content.replace(/\{.*$/s, '');
+    const codesString = result.choice.message.content.replace(/^[^\{]*\{/s, '{').replace(/\}[^\}]*$/s, '}');
+    let afterword = result.choice.message.content.replace(/^.*\}/s, '');
+    if (preface === afterword) {
+      afterword = "";
+    }
 
     const returnJson = {
       id: result.id,
-      codes: JSON.parse(codesString).result
+      preface: preface,
+      afterword: afterword
     };
 
-    console.log("returnJson : ", returnJson);
+    console.log("codesString: ", codesString);
+
+    try {
+      returnJson.codes = JSON.parse(codesString).result;
+    } catch (error) {
+      console.error('Error parsing JSON:', error);
+      returnJson.codes = [];
+    }
+
+    console.log("returnJson: ", returnJson);
 
     res.json({ output: returnJson });
   } catch (error) {
@@ -248,7 +278,7 @@ app.post('/api/post-code', async (req, res) => {
   const code = req.body.code;
   const description = req.body.description;
 
-  const filepath = "/home/take/sandbox/react/bti-gpt-code/src/" + filename;
+  const filepath = targetProjectDir + "/" + filename;
 
   console.log("filename : ", filename);
   console.log("code : ", code);
